@@ -23,8 +23,8 @@
         <property name="hibernate.format_sql">false</property>
 
         <!-- Entity-Klassen -->
-        <mapping class="de.option.chatgpt.entity.MarketDataEntity"/>
-        <mapping class="de.option.chatgpt.entity.ContractEntity"/>
-        <mapping class="de.option.chatgpt.entity.AktienEntity"/>
+        <mapping class="de.option.entity.MarketDataEntity"/>
+        <mapping class="de.option.entity.ContractEntity"/>
+        <mapping class="de.option.entity.AktienEntity"/>
     </session-factory>
 </hibernate-configuration>
