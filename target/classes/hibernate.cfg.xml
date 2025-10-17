@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE hibernate-configuration PUBLIC
+        "-//Hibernate/Hibernate Configuration DTD 3.0//EN"
+        "http://www.hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+
+<hibernate-configuration>
+    <session-factory>
+        <!-- PostgreSQL-Verbindung -->
+        <property name="hibernate.connection.driver_class">org.postgresql.Driver</property>
+        <property name="hibernate.connection.url">jdbc:postgresql://localhost:5432/postgres</property>
+        <property name="hibernate.connection.username">postgres</property>
+        <property name="hibernate.connection.password">voyager</property>
+
+        <!-- Hibernate Dialekt -->
+        <property name="hibernate.dialect">org.hibernate.dialect.PostgreSQLDialect</property>
+
+        <!-- Schema automatisch erstellen / updaten -->
+        <property name="hibernate.hbm2ddl.auto">update</property>
+        <property name="hibernate.default_schema">ibkr_db</property>
+
+        <!-- SQL-Logging -->
+        <property name="hibernate.show_sql">false</property>
+        <property name="hibernate.format_sql">false</property>
+
+        <!-- Entity-Klassen -->
+        <mapping class="de.option.chatgpt.entity.MarketDataEntity"/>
+        <mapping class="de.option.chatgpt.entity.ContractEntity"/>
+        <mapping class="de.option.chatgpt.entity.AktienEntity"/>
+    </session-factory>
+</hibernate-configuration>
