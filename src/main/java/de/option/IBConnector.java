@@ -62,6 +62,8 @@ import de.option.util.HibernateUtil;
  * Wenn Beobachtungen getriggert wird, beginnt das System jedesmal auf kaufen
  * oder verkaufen zu prüfen.
  * 
+ * finviz.com
+ * 
  */
 public class IBConnector implements EWrapper {
 	private final EClientSocket clientSocket;
@@ -90,7 +92,8 @@ public class IBConnector implements EWrapper {
 		int port = 4001; // IB Gateway
 		int clientId = 1;
 
-		clientSocket.eConnect(ip, port, clientId);
+		this.clientSocket.eConnect(ip, port, clientId);
+//		this.clientSocket.reqMarketDataType(1);
 		System.out.printf("%tT Connecting to IB Gateway...%n", LocalDateTime.now());
 
 		if (clientSocket.isConnected()) {
@@ -138,7 +141,7 @@ public class IBConnector implements EWrapper {
 
 		//
 		if (!isSimulation) {
-			this.clientSocket.placeOrder(nextOrderId++, createStockContract(contract), order);
+			this.clientSocket.placeOrder(nextOrderId++, createContract(contract), order);
 			// Danach sollte die Methode "openOrder" automatisch aufgerufen werden.
 		}
 
@@ -192,6 +195,13 @@ public class IBConnector implements EWrapper {
 	public void pruefeKaufEntscheidung(ContractEntity contractEntity) {
 		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
 
+		// Ist von der Uhrzeit her ein Kauf ok?
+		if (!darfWegenUhrzeitGekauftWerden(contractEntity)) {
+//			System.out.printf("%tT %s Kein Kauf wegen Uhrzeit.%n",
+//					LocalDateTime.now(), contractEntity.getSymbol());
+			return;
+		}
+
 		// Kein Kauf, solange ich noch Aktien habe.
 		if (arrAktien == null || arrAktien.size() != 0) {
 //			System.out.printf("%tT %s (pruefeKaufEntscheidung) Kein Kauf solange Aktien noch im Portfolio.%n",
@@ -232,6 +242,7 @@ public class IBConnector implements EWrapper {
 
 		var anzahlAktien = new BigDecimal(100);
 		BigDecimal gesamtwert = anzahlAktien.multiply(limitPrice);
+
 		// Wenn die Kaufkraft kleiner ist als der Kaufpreis, dann nicht
 		if (gesamtwert.compareTo(this.accountDto.getBuyingPower()) > 0) {
 			System.out.printf("%tT %s (pruefeKaufEntscheidung) Kaufkraft reicht zum Kaufen der Aktie nicht aus.%n",
@@ -243,6 +254,31 @@ public class IBConnector implements EWrapper {
 		this.kaufen(this.isSimulation, this.globalOrderId, anzahlAktien, contractEntity, limitPrice);
 	}
 
+	private boolean mussWegenUhrzeitVerkauftWerden(ContractEntity contractEntity) {
+
+		if (contractEntity.getPrimaryExch().equals("IBIS")) {
+			if (LocalDateTime.now().getHour() >= 15 && LocalDateTime.now().getMinute() >= 30)
+				return true;
+		} else
+			return false;
+
+		return false;
+	}
+
+	private boolean darfWegenUhrzeitGekauftWerden(ContractEntity contractEntity) {
+		
+		if (contractEntity==null || contractEntity.getPrimaryExch()==null)
+			return false;
+
+		if (contractEntity.getPrimaryExch().equals("IBIS")) {
+			if (LocalDateTime.now().getHour() >= 9 && LocalDateTime.now().getHour() < 15)
+				return true;
+		} else
+			return true;
+
+		return false;
+	}
+
 	private boolean isBaerenmarkt(ContractEntity contractEntity, BigDecimal aktuellerPreis) {
 
 		BigDecimal schluss = this.getSchlusskurs(contractEntity);
@@ -250,8 +286,8 @@ public class IBConnector implements EWrapper {
 			return false;
 
 //		System.out.printf("%tT %s Schlusskurs %.2f%n", LocalDateTime.now(), contractEntity.getSymbol(), schluss);
-		
-		System.out.printf("%tT %s Vergleiche aktuell %.2f mit schluss  %.2f%n", LocalDateTime.now(),
+
+		System.out.printf("%tT %s Vergleiche aktuell %.2f mit schluss %.2f%n", LocalDateTime.now(),
 				contractEntity.getSymbol(), aktuellerPreis, schluss.multiply(new BigDecimal(0.99)));
 		if (aktuellerPreis.compareTo(schluss.multiply(new BigDecimal(0.99))) < 0)
 			return true;
@@ -317,7 +353,8 @@ public class IBConnector implements EWrapper {
 
 	public boolean isAktieAmSteigenUeber10KurseHinweg(String symbol) {
 
-		// Nimm die letzten n+2 Briefkurse. Wenn der letzte Preis höher als der vorletzte
+		// Nimm die letzten n+2 Briefkurse. Wenn der letzte Preis höher als der
+		// vorletzte
 		// und höher als der durchschnitt der n letzten davor, dann steigt die aktie
 
 		ArrayList<MarketDataEntity> arr = HibernateUtil.getMarketDataDesc(symbol, "lastPrice", true);
@@ -335,7 +372,7 @@ public class IBConnector implements EWrapper {
 		BigDecimal vorletzterPreis = arr.get(1).getLast();
 		BigDecimal letzterPreis = arr.get(0).getLast();
 
-		System.out.printf("%tT %s Prüfe durchschnittspreis %.2f und vorletzten Preis %.2f zu %.2f%n",
+		System.out.printf("%tT %s Prüfe Durchschnittspreis %.2f und letzten Preis %.2f zu jetzigen Preis von %.2f%n",
 				LocalDateTime.now(), symbol, durchschnitt, vorletzterPreis, letzterPreis);
 
 		if (vorletzterPreis.compareTo(letzterPreis) == -1 && durchschnitt.compareTo(letzterPreis) == -1)
@@ -364,10 +401,10 @@ public class IBConnector implements EWrapper {
 		BigDecimal vorletzterPreis = arr.get(1).getLast();
 		BigDecimal letzterPreis = arr.get(0).getLast();
 
-		System.out.printf("%tT %s Prüfe durchschnittspreis %.2f und vorletzten Preis %.2f zu %.2f%n",
+		System.out.printf("%tT %s Prüfe Durchschnittspreis %.2f und letzten Preis %.2f zu jetzigen Preis von %.2f%n",
 				LocalDateTime.now(), symbol, durchschnitt, vorletzterPreis, letzterPreis);
 
-		if (durchschnitt.compareTo(letzterPreis) < 0 && vorletzterPreis.compareTo(letzterPreis) > 0 )
+		if (durchschnitt.compareTo(letzterPreis) < 0 && vorletzterPreis.compareTo(letzterPreis) > 0)
 			return true;
 
 		return false;
@@ -385,20 +422,38 @@ public class IBConnector implements EWrapper {
 
 	public void pruefeVerkaufEntscheidung(BigDecimal preis, ContractEntity contractEntity) {
 //		System.out.printf("(verkaufentscheidung) %s %.2f\n" , contractEntity.getSymbol() , preis);
-
+		
+		if (preis.equals(new BigDecimal(0.0))) {
+			System.out.printf("%tT %s Preis ist 0 - Abbruch%n", LocalDateTime.now(), contractEntity.getSymbol(), preis);
+			return;
+		}
+		
+		final BigDecimal einfacheGebuehren = new BigDecimal(0.03);
+		final BigDecimal doppelteGebuehren = einfacheGebuehren.multiply(new BigDecimal(2.0));
+		
 		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
 		for (AktienEntity aktie : arrAktien) {
 			// wenn geldkurs grösser kaufpreis dann verkaufen
 			// da kommen die 6 EURO (bzw 0,06 EURO wenn 100 Aktien) Transaktionskosten
 			// noch dazu
-			BigDecimal verkaufspreis = aktie.getKaufpreis().add(new BigDecimal(0.06));
+			BigDecimal verkaufspreis = aktie.getKaufpreis().add(doppelteGebuehren);
 			if (preis.compareTo(verkaufspreis) == 1) {
+
 				System.out.printf("%tT %s GEWINNZONE ERREICHT%n", LocalDateTime.now(), aktie.getSymbol(), preis);
+
+				// Ist von der Uhrzeit her ein Verkauf ein MUSS?
+				if (this.mussWegenUhrzeitVerkauftWerden(contractEntity)) {
+					System.out.printf("%tT %s Verkauf zum jetzigen Preis von %.2f wegen der Uhrzeit.%n",
+							LocalDateTime.now(), contractEntity.getSymbol(), preis);
+
+					return;
+				}
+
 				if (this.isAktieAmFallen(contractEntity.getSymbol())) {
 					System.out.printf("%tT %s VERKAUFSENTSCHEIDUNG GEWINN!!Kurs %.2f%n", LocalDateTime.now(),
 							aktie.getSymbol(), preis);
 					this.verkaufen(this.isSimulation, this.globalOrderId, aktie.getAnzahlAktien(),
-							createStockContract(contractEntity), preis);
+							createContract(contractEntity), preis);
 				} else {
 					System.out.printf("%tT %s Kurs steigt noch. Aktuell bei %.2f%n", LocalDateTime.now(),
 							aktie.getSymbol(), preis);
@@ -406,13 +461,13 @@ public class IBConnector implements EWrapper {
 				return;
 			}
 
-			// oder StopLoss bei über 1 % Verlust
-			BigDecimal stoploss = aktie.getKaufpreis().multiply(new BigDecimal(0.99));
+			// oder StopLoss bei über 0,5 % Verlust
+			BigDecimal stoploss = aktie.getKaufpreis().multiply(new BigDecimal(0.995));
 			if (preis.compareTo(stoploss) == -1) {
-				System.out.printf("VERKAUFSENTSCHEIDUNG STOPLOSS!! bei " + aktie.getSymbol() + " und kurs "
+				System.out.printf("VERKAUFSENTSCHEIDUNG STOPLOSS!! bei " + aktie.getSymbol() + " und Kurs "
 						+ formatter.format(preis) + "%n");
 				this.verkaufen(this.isSimulation, this.globalOrderId, aktie.getAnzahlAktien(),
-						createStockContract(contractEntity), preis);
+						createContract(contractEntity), preis);
 				return;
 			}
 
@@ -463,8 +518,12 @@ public class IBConnector implements EWrapper {
 							contract.getSymbol());
 
 					// Und Abfrage starten
-					this.clientSocket.reqMktData(contract.getTickerId(), this.createStockContract(contract), "", false,
+//					if (contract.getSecType().equals(SecType.STK.name()))
+					this.clientSocket.reqMktData(contract.getTickerId(), this.createContract(contract), "", false,
 							false, null);
+//					else if (contract.getSecType().equals(SecType.CASH.name()))
+//						this.clientSocket.reqMktData(contract.getTickerId(), this.createCashContract(contract), "",
+//								false, false, null);
 
 				}
 			}
@@ -472,12 +531,15 @@ public class IBConnector implements EWrapper {
 		}, 0, 10, TimeUnit.SECONDS);
 	}
 
-	private Contract createStockContract(ContractEntity contract) {
+	private Contract createContract(ContractEntity contract) {
 		Contract c = new Contract();
 		c.symbol(contract.getSymbol());
 		c.secType(contract.getSecType());
 		c.exchange(contract.getExchange());
 		c.currency(contract.getCurrency());
+		if (contract.getSecType().equals("STK") && contract.getPrimaryExch() != null
+				&& contract.getExchange().equals("SMART"))
+			c.primaryExch(contract.getPrimaryExch());
 		return c;
 	}
 
@@ -725,20 +787,20 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void error(Exception e) {
-		// TODO Auto-generated method stub
-
+		e.printStackTrace();
 	}
 
 	@Override
 	public void error(String str) {
 		// TODO Auto-generated method stub
-
+		System.out.println("ERROR " + str);
 	}
 
 	@Override
 	public void error(int id, int errorCode, String errorMsg, String advancedOrderRejectJson) {
 		// TODO Auto-generated method stub
 
+		System.out.println("ERROR " + errorMsg);
 	}
 
 	@Override

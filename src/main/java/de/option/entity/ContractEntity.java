@@ -28,6 +28,7 @@ public class ContractEntity {
     private String exchange;
     private String currency;
     private String secType;
+    private String primaryExch;
 
     public ContractEntity() {}
 
@@ -94,6 +95,14 @@ public class ContractEntity {
 
 	public void setSecType(String secType) {
 		this.secType = secType;
+	}
+
+	public String getPrimaryExch() {
+		return primaryExch;
+	}
+
+	public void setPrimaryExch(String primaryExch) {
+		this.primaryExch = primaryExch;
 	}
 
 }
