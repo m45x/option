@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.ib.client.Bar;
 import com.ib.client.CommissionReport;
@@ -47,6 +48,7 @@ import com.ib.client.TickType;
 import de.option.dto.AccountDto;
 import de.option.entity.AktienEntity;
 import de.option.entity.ContractEntity;
+import de.option.entity.ExecEntity;
 import de.option.entity.MarketDataEntity;
 import de.option.util.HibernateUtil;
 
@@ -70,9 +72,11 @@ public class IBConnector implements EWrapper {
 	private final EJavaSignal signal;
 	private EReader reader;
 	private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-	private Integer globalOrderId;
-	private Boolean isSimulation = true;
+	// replaced Integer with AtomicInteger to ensure thread-safe unique order IDs
+	private final AtomicInteger globalOrderId = new AtomicInteger(0);
 	private AccountDto accountDto = null;
+
+	private Boolean isSimulation = false;
 
 	private HashMap<Integer, String> hmMarketData = new HashMap<>();
 	private Boolean accountWirdAktualisiert = false;
@@ -98,6 +102,11 @@ public class IBConnector implements EWrapper {
 //		this.clientSocket.reqMarketDataType(1);
 		log.info("Connecting to IB Gateway...");
 
+//		this.clientSocket.reqOpenOrders();
+
+		// Löscht alle offenen Orders (global)
+		// this.clientSocket.reqGlobalCancel();
+
 		if (clientSocket.isConnected()) {
 			log.info("{} Connected!", LocalDateTime.now());
 
@@ -121,7 +130,8 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void nextValidId(int orderId) {
-		this.globalOrderId = orderId;
+		// set the starting order id provided by the TWS/Gateway
+		this.globalOrderId.set(orderId);
 
 		startScheduler();
 
@@ -129,8 +139,18 @@ public class IBConnector implements EWrapper {
 		accountAktualisieren();
 	}
 
-	private void kaufen(boolean isSimulation, Integer nextOrderId, BigDecimal anzahl, ContractEntity contract,
-			BigDecimal limitPrice) {
+	// thread-safe method to get a unique order id for each placed order
+	private int getNextOrderId() {
+		int current = this.globalOrderId.getAndIncrement();
+		if (current == 0) {
+			// If nextValidId hasn't been called yet, warn the user — still return a value
+			log.warn(
+					"getNextOrderId() used before nextValidId was received; using id=0 and incrementing. This may cause errors.");
+		}
+		return current;
+	}
+
+	private void kaufen(boolean isSimulation, BigDecimal anzahl, ContractEntity contract, BigDecimal limitPrice) {
 
 		//
 		Order order = new Order();
@@ -141,73 +161,87 @@ public class IBConnector implements EWrapper {
 		order.lmtPrice(limitPrice.doubleValue());
 		order.tif("DAY");
 
+		// get a unique order id
+		int orderIdToUse = getNextOrderId();
+
 		//
 		if (!isSimulation) {
-			this.clientSocket.placeOrder(nextOrderId++, createContract(contract), order);
+			this.clientSocket.placeOrder(orderIdToUse, createContract(contract), order);
 			// Danach sollte die Methode "openOrder" automatisch aufgerufen werden.
 		}
 
 		// Ohne preis in Aktien reinschreiben
-		AktienEntity aktien = new AktienEntity();
-		aktien.setSymbol(contract.getSymbol());
-		aktien.setCurrency(contract.getCurrency());
-		aktien.setExchange(contract.getExchange());
-		aktien.setAnzahlAktien(anzahl);
-		aktien.setKaufdatum(LocalDateTime.now());
-		if (!isSimulation)
-			aktien.setKaufpreis(null);
-		else
-			aktien.setKaufpreis(limitPrice);
-		HibernateUtil.save(aktien);
+		AktienEntity aktie = HibernateUtil.neueAktie(contract, anzahl, orderIdToUse, limitPrice);
+
+		// Bei der Simulation wird sofort der Preis gesetzt
+		// beim echten kauf erst wenn es wirklich gekauft wurde
+		if (this.isSimulation)
+			HibernateUtil.kaufAusgefuehrt(aktie.getId(), limitPrice, this.calcStopLoss(limitPrice));
 	}
 
-	private void verkaufen(boolean isSimulation, Integer nextOrderId, BigDecimal anzahl, Contract contract,
-			BigDecimal limitPrice) {
+	private void verkaufen(AktienEntity aktie, ContractEntity contractEntity, BigDecimal limitPrice) {
 
+		Contract contract = createContract(contractEntity);
 		//
 		Order order = new Order();
 		order.action("SELL");
-		order.totalQuantity(Decimal.get(anzahl));
+		order.totalQuantity(Decimal.get(aktie.getAnzahlAktien()));
 		order.orderType("LMT");
 //		order.orderType("MKT");
 		order.lmtPrice(limitPrice.doubleValue());
 		order.tif("DAY");
 
 		if (!isSimulation) {
-			this.clientSocket.placeOrder(nextOrderId++, contract, order);
+
+			//
+			int orderIdToUse = getNextOrderId();
+			this.clientSocket.placeOrder(orderIdToUse, contract, order);
+
+			//
+			aktie = HibernateUtil.setAktieZumVerkaufAnmelden(aktie.getId(), orderIdToUse);
 			// Danach sollte die Methode "openOrder" automatisch aufgerufen werden.
 		}
 
 		// Bei der Simulation wird hier bereits der Preis aktualisiert, sonst
 		// wird das erst bei execOrder gemacht
 		if (isSimulation) {
-			ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
-			AktienEntity aktie = null;
-			for (AktienEntity e : arr)
-				if (e.getVerkkaufpreis() == null)
-					aktie = e;
-
-			if (aktie != null) {
-				aktie = HibernateUtil.setAktieVerkauft(aktie.getId(), limitPrice);
-			}
+			/*
+			 * ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(),
+			 * true); AktienEntity aktie = null; for (AktienEntity e : arr) if
+			 * (e.getVerkkaufpreis() == null) aktie = e;
+			 * 
+			 * if (aktie != null) {
+			 */
+			aktie = HibernateUtil.setAktieVerkauft(aktie.getId(), limitPrice);
+			// }
 		}
 
 	}
 
 	public void pruefeKaufEntscheidung(ContractEntity contractEntity) {
-		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
 
+		if (contractEntity == null) {
+			log.info("Kein ContractEntity!");
+			return;
+		}
+
+		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
+		
+		if (contractEntity.getKaufbar() == false) {
+//			log.info("{} (pruefeKaufEntscheidung) Nicht kaufbar.", contractEntity.getSymbol());
+			return;
+		}
+		
 		// Ist von der Uhrzeit her ein Kauf ok?
 		if (!darfWegenUhrzeitGekauftWerden(contractEntity)) {
-//			System.out.printf(" {} Kein Kauf wegen Uhrzeit.",
-//					LocalDateTime.now(), contractEntity.getSymbol());
+//			log.info("{} (pruefeKaufEntscheidung) Kein Kauf wegen Uhrzeit.", contractEntity.getSymbol());
 			return;
 		}
 
 		// Kein Kauf, solange ich noch Aktien habe.
 		if (arrAktien == null || arrAktien.size() != 0) {
-//			System.out.printf(" %s (pruefeKaufEntscheidung) Kein Kauf solange Aktien noch im Portfolio.",
-//					LocalDateTime.now(), contractEntity.getSymbol());
+//			log.info("{} (pruefeKaufEntscheidung) Kein Kauf solange Aktien noch im Portfolio.",
+//					contractEntity.getSymbol());
 			return;
 		}
 
@@ -219,22 +253,21 @@ public class IBConnector implements EWrapper {
 
 		// Kaufentscheidung ja/nein
 		if (!this.isAktieAmSteigen(contractEntity.getSymbol())) {
-			log.info("{} (pruefeKaufEntscheidung) Aktie ist nicht am steigen.", contractEntity.getSymbol());
+//			log.info("{} (pruefeKaufEntscheidung) Aktie ist nicht am steigen.", contractEntity.getSymbol());
 			return;
 		}
-		log.info("{} (pruefeKaufEntscheidung) Aktie steigt!", contractEntity.getSymbol());
+//		log.info("{} (pruefeKaufEntscheidung) Aktie steigt!", contractEntity.getSymbol());
 
 		// Limitprice errechnen
 		BigDecimal limitPrice = this.getLetztenKaufPreis(contractEntity.getSymbol());
 		if (limitPrice == null) {
-			// SLF4J verwendet '{}' als Platzhalter (nicht %s)
 			log.info("{} (pruefeKaufEntscheidung) LimitPreis war nicht zu ermitteln!", contractEntity.getSymbol());
 			return;
 		}
 
 		// Wenn Bärenmarkt dann nicht
 		if (this.isBaerenmarkt(contractEntity, limitPrice)) {
-			log.info("{} (pruefeKaufEntscheidung) Bärenmarkt. Kein Kauf", contractEntity.getSymbol());
+//			log.info("{} (pruefeKaufEntscheidung) Bärenmarkt. Kein Kauf", contractEntity.getSymbol());
 			return;
 		}
 
@@ -243,16 +276,16 @@ public class IBConnector implements EWrapper {
 
 		// Wenn die Kaufkraft kleiner ist als der Kaufpreis, dann nicht
 		if (gesamtwert.compareTo(this.accountDto.getBuyingPower()) > 0) {
-			log.info("{} (pruefeKaufEntscheidung) Kaufkraft reicht zum Kaufen der Aktie nicht aus.",
-					contractEntity.getSymbol());
+//			log.info("{} (pruefeKaufEntscheidung) Kaufkraft reicht zum Kaufen der Aktie nicht aus.",
+//					contractEntity.getSymbol());
 			return;
 		}
 
 		log.info("{} (pruefeKaufEntscheidung) KAUFEN!", contractEntity.getSymbol());
-		this.kaufen(this.isSimulation, this.globalOrderId, anzahlAktien, contractEntity, limitPrice);
+		this.kaufen(this.isSimulation, anzahlAktien, contractEntity, limitPrice);
 	}
 
-	private boolean mussWegenUhrzeitVerkauftWerden(ContractEntity contractEntity) {
+	/*private boolean mussWegenUhrzeitVerkauftWerden(ContractEntity contractEntity) {
 
 		if (contractEntity.getPrimaryExch().equals("IBIS")) {
 			if (LocalDateTime.now().getHour() >= 15 && LocalDateTime.now().getMinute() >= 30)
@@ -261,7 +294,7 @@ public class IBConnector implements EWrapper {
 			return false;
 
 		return false;
-	}
+	}*/
 
 	private boolean darfWegenUhrzeitGekauftWerden(ContractEntity contractEntity) {
 
@@ -269,7 +302,7 @@ public class IBConnector implements EWrapper {
 			return false;
 
 		if (contractEntity.getPrimaryExch().equals("IBIS")) {
-			if (LocalDateTime.now().getHour() >= 9 && LocalDateTime.now().getHour() < 15)
+			if (LocalDateTime.now().getHour() >= 9 && LocalDateTime.now().getHour() < 17)
 				return true;
 		} else
 			return true;
@@ -285,8 +318,8 @@ public class IBConnector implements EWrapper {
 
 //		log.info("%s Schlusskurs %.2f", LocalDateTime.now(), contractEntity.getSymbol(), schluss);
 
-		log.info("{} Vergleiche aktuell {} mit schluss {}", contractEntity.getSymbol(),
-						formatter.format(aktuellerPreis), formatter.format(schluss.multiply(new BigDecimal(0.99))));
+//		log.info("{} Vergleiche aktuell {} mit schluss {}", contractEntity.getSymbol(),
+//				formatter.format(aktuellerPreis), formatter.format(schluss.multiply(new BigDecimal(0.99))));
 		if (aktuellerPreis.compareTo(schluss.multiply(new BigDecimal(0.99))) < 0)
 			return true;
 		else
@@ -305,26 +338,28 @@ public class IBConnector implements EWrapper {
 
 	}
 
-	private BigDecimal getEroeffnungskurs(ContractEntity contractEntity) {
-
-		ArrayList<MarketDataEntity> arr = HibernateUtil.getMarketDataDesc(contractEntity.getSymbol(), "close", true);
-		if (arr == null || arr.size() == 0)
-			return null;
-
-		BigDecimal openkurs = arr.get(0).getLast();
-
-		log.info("{} Eröffnungskurs {}", contractEntity.getSymbol(), formatter.format(openkurs));
-		return openkurs;
-
-	}
+	/*
+	 * private BigDecimal getEroeffnungskurs(ContractEntity contractEntity) {
+	 * 
+	 * ArrayList<MarketDataEntity> arr =
+	 * HibernateUtil.getMarketDataDesc(contractEntity.getSymbol(), "close", true);
+	 * if (arr == null || arr.size() == 0) return null;
+	 * 
+	 * BigDecimal openkurs = arr.get(0).getLast();
+	 * 
+	 * log.info("{} Eröffnungskurs {}", contractEntity.getSymbol(),
+	 * formatter.format(openkurs)); return openkurs;
+	 * 
+	 * }
+	 */
 
 	public boolean isAktieAmSteigen(String symbol) {
 //		return this.isAktieAmSteigenLetzten3(symbol);
 		return this.isAktieAmSteigenUeber10KurseHinweg(symbol);
 	}
 
-	public boolean isAktieAmFallen(String symbol) {
-		return this.isAktieAmFallenUeber10KurseHinweg(symbol);
+	public boolean isAktieAmFallen(String symbol, BigDecimal aktuellerPreis) {
+		return this.isAktieAmFallenUeber10KurseHinweg(symbol, aktuellerPreis);
 	}
 
 	public boolean isAktieAmSteigenLetzten3(String symbol) {
@@ -341,8 +376,9 @@ public class IBConnector implements EWrapper {
 		BigDecimal preis3 = arr.get(0).getLast();
 		BigDecimal preis2 = arr.get(1).getLast();
 		BigDecimal preis1 = arr.get(2).getLast();
-		log.info("{} Prüfe {} zu {} zu {}", symbol, formatter.format(preis1), formatter.format(preis2),
-				formatter.format(preis3));
+		// log.info("{} Prüfe {} zu {} zu {}", symbol, formatter.format(preis1),
+		// formatter.format(preis2),
+		// formatter.format(preis3));
 
 		if (preis1.compareTo(preis2) == -1 && preis2.compareTo(preis3) == -1)
 			return true;
@@ -371,41 +407,44 @@ public class IBConnector implements EWrapper {
 		BigDecimal vorletzterPreis = arr.get(1).getLast();
 		BigDecimal letzterPreis = arr.get(0).getLast();
 
-		log.info("{} Prüfe Durchschnittspreis {} und letzten Preis {} zu jetzigen Preis von {}",
-				 symbol, formatter.format(durchschnitt), formatter.format(vorletzterPreis),
-				 formatter.format(letzterPreis));
+//		log.info("{} Prüfe Durchschnittspreis {} und letzten Preis {} zu jetzigen Preis von {}", symbol,
+//				formatter.format(durchschnitt), formatter.format(vorletzterPreis), formatter.format(letzterPreis));
 
-		if (vorletzterPreis.compareTo(letzterPreis) == -1 && durchschnitt.compareTo(letzterPreis) == -1)
+		if (vorletzterPreis.compareTo(letzterPreis) < 0 && durchschnitt.compareTo(letzterPreis) < 0)
 			return true;
 
 		return false;
 	}
 
-	public boolean isAktieAmFallenUeber10KurseHinweg(String symbol) {
+	public boolean isAktieAmFallenUeber10KurseHinweg(String symbol, BigDecimal aktuellerPreis) {
 
 		// Nimm die letzten 12 Briefkurse. Wenn der letzte Preis höher als der vorletzte
 		// und höher als der durchschnitt der 10 letzten davor, dann steigt die aktie
 
-		ArrayList<MarketDataEntity> arr = HibernateUtil.getMarketDataDesc(symbol, "lastPrice", true);
+		ArrayList<MarketDataEntity> arr = HibernateUtil.getMarketDataDesc(symbol, TickType.BID.field(), true);
 
-		if (arr == null || arr.size() <= 12)
+		if (arr == null || arr.size() <= 11)
 			return false;
 
 		BigDecimal preissummiert = BigDecimal.ZERO;
-		for (int i = 2; i < 12; i++) {
-			preissummiert = preissummiert.add(arr.get(i).getLast());
+		Integer anzahlWerte = 0;
+		for (int i = 1; i < 11; i++) {
+			preissummiert = preissummiert.add(arr.get(i).getGeldkurs());
+			anzahlWerte++;
 		}
 
-		BigDecimal durchschnitt = preissummiert.divide(new BigDecimal(10.0),
+		BigDecimal durchschnitt = preissummiert.divide(new BigDecimal(anzahlWerte),
 				new MathContext(2, RoundingMode.HALF_EVEN));
-		BigDecimal vorletzterPreis = arr.get(1).getLast();
-		BigDecimal letzterPreis = arr.get(0).getLast();
+//		BigDecimal vorletzterPreis = arr.get(1).getLast();
+		BigDecimal letzterPreis = arr.get(0).getGeldkurs();
 
-		log.info("{} Prüfe Durchschnittspreis {} und letzten Preis {} zu jetzigen Preis von {}",
-				 symbol, formatter.format(durchschnitt), formatter.format(vorletzterPreis),
-				 formatter.format(letzterPreis));
+		log.info("{} Prüfe Durchschnittspreis {} und letzten Preis {} zu jetzigen Preis von {}", symbol,
+				formatter.format(durchschnitt), formatter.format(letzterPreis), formatter.format(aktuellerPreis));
 
-		if (durchschnitt.compareTo(letzterPreis) < 0 && vorletzterPreis.compareTo(letzterPreis) > 0)
+		// Durchschnitt höher als letzter Preis
+		// und letzter Preis kleiner oder gleich als vorletzter Preis
+		// dann sinkt die Aktie
+		if (durchschnitt.compareTo(letzterPreis) > 0 && letzterPreis.compareTo(aktuellerPreis) >= 0)
 			return true;
 
 		return false;
@@ -429,54 +468,95 @@ public class IBConnector implements EWrapper {
 			return;
 		}
 
-		final BigDecimal einfacheGebuehren = new BigDecimal(0.03);
-		final BigDecimal doppelteGebuehren = einfacheGebuehren.multiply(new BigDecimal(2.0));
-
 		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
 		for (AktienEntity aktie : arrAktien) {
+			
 			// wenn geldkurs grösser kaufpreis dann verkaufen
-			// da kommen die 6 EURO (bzw 0,06 EURO wenn 100 Aktien) Transaktionskosten
-			// noch dazu
-			BigDecimal verkaufspreis = aktie.getKaufpreis().add(doppelteGebuehren);
+			if (aktie.getKaufpreis() == null) {
+//				log.info("{} Kaufpreis ist null - Abbruch", aktie.getSymbol());
+				continue;
+			}
+
+			if (aktie.getVerkaufOrderId() != null) {
+//				log.info("{} Verkaufsorder bereits platziert", aktie.getSymbol());
+				continue;
+			}
+
+			BigDecimal verkaufspreis = aktie.getKaufpreis();
+
+			// Hier kommen die Transaktionskosten noch dazu
+			if (aktie.getGebuehren()!=null) verkaufspreis = verkaufspreis.add(aktie.getGebuehren().divide(aktie.getAnzahlAktien(), 4, RoundingMode.HALF_EVEN));
+			
+			// Preis grösser als Verkaufspreis
 			if (preis.compareTo(verkaufspreis) == 1) {
 
 				log.info("{} GEWINNZONE ERREICHT", aktie.getSymbol());
 
 				// Ist von der Uhrzeit her ein Verkauf ein MUSS?
-				if (this.mussWegenUhrzeitVerkauftWerden(contractEntity)) {
-					log.info("{} Verkauf zum jetzigen Preis von {} wegen der Uhrzeit.",
-							contractEntity.getSymbol(), formatter.format(preis));
+				/*if (this.mussWegenUhrzeitVerkauftWerden(contractEntity)) {
+					log.info("{} Verkauf zum jetzigen Preis von {} wegen der Uhrzeit.", contractEntity.getSymbol(),
+							formatter.format(preis));
 
 					return;
-				}
+				}*/
 
-				if (this.isAktieAmFallen(contractEntity.getSymbol())) {
-					log.info("{} VERKAUFSENTSCHEIDUNG GEWINN!!Kurs {}", aktie.getSymbol(), formatter.format(preis));
-					this.verkaufen(this.isSimulation, this.globalOrderId, aktie.getAnzahlAktien(),
-							createContract(contractEntity), preis);
+				if (this.isAktieAmFallen(contractEntity.getSymbol(), preis)) {
+					log.info("{} VERKAUFSENTSCHEIDUNG GEWINN!! Kurs {}", aktie.getSymbol(), formatter.format(preis));
+					this.verkaufen(aktie, contractEntity, preis);
+					return;
 				} else {
-					log.info("{} Kurs steigt noch. Aktuell bei {}", aktie.getSymbol(), formatter.format(preis));
+					log.info("{} Kurs steigt noch. Kaufpreis {}. Aktuell bei {}", aktie.getSymbol(),
+							formatter.format(aktie.getKaufpreis()), formatter.format(preis));
+					return;
 				}
-				return;
 			}
 
-			// oder StopLoss bei über 0,5 % Verlust
-			BigDecimal stoploss = aktie.getKaufpreis().multiply(new BigDecimal(0.995));
-			if (preis.compareTo(stoploss) == -1) {
-				log.info("VERKAUFSENTSCHEIDUNG STOPLOSS!! bei " + aktie.getSymbol() + " und Kurs "
-						+ formatter.format(preis) + "");
-				this.verkaufen(this.isSimulation, this.globalOrderId, aktie.getAnzahlAktien(),
-						createContract(contractEntity), preis);
+			// oder StopLoss bei über n % Verlust
+//			if (aktie.getStoplosspreis() == null) {
+//				log.info("{} (pruefeVerkaufentscheidung) STOPLOSS Preis war null, daher neu berechnet: {}", aktie.getSymbol(),
+//						formatter.format(this.calcStopLoss(aktie.getKaufpreis())));
+//			}
+
+			if (aktie.getStoplosspreis() != null && preis.compareTo(aktie.getStoplosspreis()) == -1) {
+				log.info("{} (pruefeVerkaufentscheidung) VERKAUF STOPLOSS!! Kurs {}", aktie.getSymbol(),
+						formatter.format(preis));
+				this.verkaufen(aktie, contractEntity, preis);
 				return;
 			}
 
 			//
-
-			log.info("{} Verkauf erst, wenn Preis über {} oder unter {}. Aktueller Preis: {}",
-					contractEntity.getSymbol(), formatter.format(verkaufspreis), formatter.format(stoploss),
-					formatter.format(preis));
-
+			if (aktie.getStoplosspreis() != null) {
+				log.info("{} (pruefeVerkaufentscheidung)  {} <- {} - {} - {} -> {}", contractEntity.getSymbol(),
+						formatter.format(aktie.getStoplosspreis()),
+						formatter.format(preis.subtract(aktie.getStoplosspreis())), formatter.format(preis),
+						formatter.format(verkaufspreis.subtract(preis)), formatter.format(verkaufspreis));
+			} else {
+				log.info("{} (pruefeVerkaufentscheidung) {} - {} -> {}", contractEntity.getSymbol(),
+						formatter.format(preis), formatter.format(verkaufspreis.subtract(preis)),
+						formatter.format(verkaufspreis));
+			}
 		}
+	}
+
+	private BigDecimal calcStopLoss(BigDecimal kaufPreis) {
+		// oder StopLoss bei über n % Verlust
+		/*BigDecimal percentLimit = new BigDecimal(0.995);
+		if (kaufPreis.compareTo(new BigDecimal(30)) == 1)
+			percentLimit = new BigDecimal(0.99);
+		if (kaufPreis.compareTo(new BigDecimal(80)) == 1)
+			percentLimit = new BigDecimal(0.998);
+		if (kaufPreis.compareTo(new BigDecimal(200)) == 1)
+			percentLimit = new BigDecimal(0.999);
+
+		BigDecimal stoplossPercent = kaufPreis.multiply(percentLimit);
+
+		// Oder absoluter StopLoss von 20 Cent
+		BigDecimal stoplossAbsolut = kaufPreis.subtract(new BigDecimal(0.20));
+		BigDecimal stoploss = (stoplossPercent.compareTo(stoplossAbsolut) == -1) ? stoplossAbsolut : stoplossPercent;
+		return stoploss;
+		*/
+//		return new BigDecimal(0.01); // stoploss;
+		return null; // stoploss;
 	}
 
 	private void startScheduler() {
@@ -599,7 +679,8 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void openOrder(int orderId, Contract contract, Order order, OrderState orderState) {
-		log.info("openOrder aufgerufen!! {} / {}", orderId, contract.symbol());
+		log.info("openOrder aufgerufen!! OrderId: {} / {} / Status {} ", orderId, contract.symbol(),
+				orderState.completedStatus());
 	}
 
 	private void accountAktualisieren() {
@@ -616,25 +697,27 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void execDetails(int reqId, Contract contract, Execution execution) {
-		log.info("execDetails! ORDER ausgeführt! {} / {}", reqId, contract.symbol());
+		log.info("execDetails! ORDER ausgeführt! {} / {} / OrderID: ", reqId, contract.symbol(), execution.orderId());
 
 		// Schonmal account aktualisierung anstoßen
 		accountAktualisieren();
 
+		AktienEntity aktie = null;
 		String side = execution.side();
 		if ("BOT".equals(side)) {
-			log.info("📈 Kauf ausgeführt!");
+			log.info("📈 Kauf ausgeführt! Kaufpreis " + execution.price());
 
 			// suche Aktie ohne Preis
 			ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
-			AktienEntity aktie = null;
 			for (AktienEntity e : arr)
 				if (e.getKaufpreis() == null)
 					aktie = e;
 
 			if (aktie != null) {
-				aktie.setKaufpreis(new BigDecimal(execution.price()));
-				HibernateUtil.save(aktie);
+				BigDecimal stoploss = this.calcStopLoss(new BigDecimal(execution.price()));
+				HibernateUtil.kaufAusgefuehrt(aktie.getId(), new BigDecimal(execution.price()), stoploss);
+			} else {
+				log.error("Kaufaktie nicht gefunden für Symbol {}", contract.symbol());
 			}
 
 		} else if ("SLD".equals(side)) {
@@ -642,17 +725,25 @@ public class IBConnector implements EWrapper {
 
 			// Suche danach und dann updaten
 			ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
-			AktienEntity aktie = null;
 			for (AktienEntity e : arr)
 				if (e.getVerkkaufpreis() == null)
 					aktie = e;
 
 			if (aktie != null) {
-				aktie.setVerkkaufpreis(new BigDecimal(execution.price()));
-				HibernateUtil.save(aktie);
+				HibernateUtil.verkaufAusgefuehrt(aktie.getId(), new BigDecimal(execution.price()));
+			} else {
+				log.error("Verkaufaktie nicht gefunden für Symbol {}", contract.symbol());
 			}
 		}
 
+		if (aktie!=null) {
+			ExecEntity execEntity = new ExecEntity();
+			execEntity.setAktien(aktie);
+			execEntity.setOrderId(execution.orderId());
+			execEntity.setExecId(execution.execId());
+			HibernateUtil.save(execEntity);
+		}
+		
 	}
 
 	@Override
@@ -686,6 +777,8 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void completedOrder(Contract contract, Order order, OrderState orderState) {
+		log.info("completedOrder aufgerufen!! OrderId: {} / {} / Status {} ", order.orderId(), contract.symbol(),
+				orderState.completedStatus());
 	}
 
 	@Override
@@ -1010,6 +1103,7 @@ public class IBConnector implements EWrapper {
 	@Override
 	public void openOrderEnd() {
 		// TODO Auto-generated method stub
+		log.info("openOrderEnd aufgerufen!!");
 
 	}
 
@@ -1052,6 +1146,7 @@ public class IBConnector implements EWrapper {
 	@Override
 	public void execDetailsEnd(int reqId) {
 		// TODO Auto-generated method stub
+		log.info("execDetailsEnd aufgerufen!! reqId: {}", reqId);
 
 	}
 
@@ -1130,7 +1225,13 @@ public class IBConnector implements EWrapper {
 
 	@Override
 	public void commissionReport(CommissionReport commissionReport) {
-		// TODO Auto-generated method stub
+		log.info("commissionReport");
+		
+		ArrayList<ExecEntity> arr = HibernateUtil.getExecs(commissionReport.execId());
+		
+		if (arr!=null && arr.size()==1) {
+			HibernateUtil.addGebuehrZuAktie(arr.get(0).getAktien() , new BigDecimal(commissionReport.commission()));
+		}
 
 	}
 

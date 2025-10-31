@@ -1,11 +1,37 @@
 <configuration>
+  <property name="LOG_HOME" value="logs" />
+
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n</pattern>
     </encoder>
   </appender>
 
+  <!-- Rolling file appender: schreibt Logs nach ${LOG_HOME}/app.log und rotiert täglich
+       und zusätzlich bei Erreichen einer Größenbeschränkung. Alte Logs werden
+       komprimiert aufgehoben. Einstellungen: maxFileSize, maxHistory, totalSizeCap -->
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${LOG_HOME}/app.log</file>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd HH:mm:ss} %-5level %logger{36} - %msg%n</pattern>
+    </encoder>
+
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <!-- Date + index, gz-compressed archives -->
+      <fileNamePattern>${LOG_HOME}/app.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+      <!-- rotate when file > 10MB (per day) -->
+      <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+        <maxFileSize>10MB</maxFileSize>
+      </timeBasedFileNamingAndTriggeringPolicy>
+      <!-- keep 30 days -->
+      <maxHistory>360</maxHistory>
+      <!-- total cap for all archived logs -->
+      <totalSizeCap>3GB</totalSizeCap>
+    </rollingPolicy>
+  </appender>
+
   <root level="INFO">
     <appender-ref ref="STDOUT" />
+    <appender-ref ref="FILE" />
   </root>
 </configuration>

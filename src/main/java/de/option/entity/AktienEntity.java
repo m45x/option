@@ -30,11 +30,17 @@ public class AktienEntity {
     private String symbol;
     private String exchange;
     private String currency;
+    private Integer kaufOrderId;
     private LocalDateTime kaufdatum;
+    private BigDecimal kauflimit;
     private BigDecimal kaufpreis;
+    private BigDecimal stoplosspreis;
+    private Integer verkaufOrderId;
     private LocalDateTime verkaufdatum;
     private BigDecimal verkkaufpreis;
     private BigDecimal anzahlAktien;
+    private BigDecimal gewinnOderVerlust;
+    private BigDecimal gebuehren;
   
     public AktienEntity() {}
 
@@ -110,5 +116,52 @@ public class AktienEntity {
 		this.anzahlAktien = anzahlAktien;
 	}
 
+	public BigDecimal getGewinnOderVerlust() {
+		return gewinnOderVerlust;
+	}
+
+	public void setGewinnOderVerlust(BigDecimal gewinnOderVerlust) {
+		this.gewinnOderVerlust = gewinnOderVerlust;
+	}
+
+	public Integer getVerkaufOrderId() {
+		return verkaufOrderId;
+	}
+
+	public void setVerkaufOrderId(Integer verkaufOrderId) {
+		this.verkaufOrderId = verkaufOrderId;
+	}
+
+	public BigDecimal getStoplosspreis() {
+		return stoplosspreis;
+	}
+
+	public void setStoplosspreis(BigDecimal stoplosspreis) {
+		this.stoplosspreis = stoplosspreis;
+	}
+
+	public Integer getKaufOrderId() {
+		return kaufOrderId;
+	}
+
+	public void setKaufOrderId(Integer kaufOrderId) {
+		this.kaufOrderId = kaufOrderId;
+	}
+
+	public BigDecimal getKauflimit() {
+		return kauflimit;
+	}
+
+	public void setKauflimit(BigDecimal kauflimit) {
+		this.kauflimit = kauflimit;
+	}
+
+	public BigDecimal getGebuehren() {
+		return gebuehren;
+	}
+
+	public void setGebuehren(BigDecimal gebuehren) {
+		this.gebuehren = gebuehren;
+	}
 	
 }

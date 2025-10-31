@@ -20,6 +20,7 @@ public class ContractEntity {
     private Long id;
 
     private Boolean aktiv;
+    private Boolean kaufbar;
     
     @Column(unique = true)
     private Integer tickerId;
@@ -103,6 +104,14 @@ public class ContractEntity {
 
 	public void setPrimaryExch(String primaryExch) {
 		this.primaryExch = primaryExch;
+	}
+
+	public Boolean getKaufbar() {
+		return kaufbar;
+	}
+
+	public void setKaufbar(Boolean kaufbar) {
+		this.kaufbar = kaufbar;
 	}
 
 }

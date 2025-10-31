@@ -12,6 +12,7 @@ import org.hibernate.cfg.Configuration;
 
 import de.option.entity.AktienEntity;
 import de.option.entity.ContractEntity;
+import de.option.entity.ExecEntity;
 import de.option.entity.MarketDataEntity;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
@@ -36,13 +37,115 @@ public class HibernateUtil {
 		return sessionFactory;
 	}
 
-	public static void save(Object data) {
+	public static void save(MarketDataEntity data) {
 		Session session = sessionFactory.openSession();
 		try {
 			session.beginTransaction();
 			session.persist(data);
 			session.getTransaction().commit();
 		} finally {
+			session.close();
+		}
+	}
+	
+	public static void save(ExecEntity data) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			session.persist(data);
+			session.getTransaction().commit();
+		} finally {
+			session.close();
+		}
+	}
+	
+	public static AktienEntity neueAktie(ContractEntity contract, BigDecimal anzahl, Integer orderId, BigDecimal kauflimit) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			AktienEntity aktie = new AktienEntity();
+			aktie.setSymbol(contract.getSymbol());
+			aktie.setCurrency(contract.getCurrency());
+			aktie.setExchange(contract.getExchange());
+			aktie.setAnzahlAktien(anzahl);
+			aktie.setKaufdatum(LocalDateTime.now());
+			aktie.setKaufOrderId(orderId);
+			aktie.setKauflimit(kauflimit);
+			return session.merge(aktie);
+		} finally {
+			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
+	public static void addGebuehrZuAktie(AktienEntity aktie, BigDecimal gebuehr){
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			aktie = session.find(AktienEntity.class, aktie.getId());
+			BigDecimal tmpgebuehr = aktie.getGebuehren();
+			if (tmpgebuehr == null)
+				tmpgebuehr = BigDecimal.ZERO;
+			tmpgebuehr = tmpgebuehr.add(gebuehr);
+			aktie.setGebuehren(tmpgebuehr);
+			session.merge(aktie);
+		} finally {
+			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
+	public static AktienEntity kaufAusgefuehrt(Long aktieId , BigDecimal kaufspreis, BigDecimal stoploss) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			AktienEntity aktie = session.find(AktienEntity.class, aktieId);
+			if (aktie == null) {
+				System.out.println("speichern fehlgeschlagen");
+				return null;
+			}
+			aktie.setKaufpreis(kaufspreis);
+			aktie.setStoplosspreis(stoploss);
+			return session.merge(aktie);
+		} finally {
+			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
+	public static AktienEntity verkaufAusgefuehrt(Long aktieId , BigDecimal verkaufspreis) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			AktienEntity aktie = session.find(AktienEntity.class, aktieId);
+			if (aktie == null) {
+				System.out.println("speichern fehlgeschlagen");
+				return null;
+			}
+			if (aktie.getVerkaufdatum()==null)
+				aktie.setVerkaufdatum(LocalDateTime.now());
+			aktie.setVerkkaufpreis(verkaufspreis);
+			aktie.setGewinnOderVerlust(verkaufspreis.subtract(aktie.getKaufpreis()).multiply(new BigDecimal(100)).subtract(aktie.getGebuehren()));
+			return session.merge(aktie);
+		} finally {
+			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
+	public static AktienEntity setAktieZumVerkaufAnmelden(Long idAktie, Integer orderId) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			AktienEntity aktie = session.find(AktienEntity.class, idAktie);
+			if (aktie == null) {
+				System.out.println("speichern fehlgeschlagen");
+				return null;
+			}
+			aktie.setVerkaufOrderId(orderId);
+			return session.merge(aktie);
+		} finally {
+			session.getTransaction().commit();
 			session.close();
 		}
 	}
@@ -58,6 +161,7 @@ public class HibernateUtil {
 			}
 			aktie.setVerkkaufpreis(verkaufspreis);
 			aktie.setVerkaufdatum(LocalDateTime.now());
+			aktie.setGewinnOderVerlust(verkaufspreis.subtract(aktie.getKaufpreis()));
 			return session.merge(aktie);
 		} finally {
 			session.getTransaction().commit();
@@ -154,6 +258,31 @@ public class HibernateUtil {
 			TypedQuery<MarketDataEntity> tq = session.createQuery(cq);
 			List<MarketDataEntity> allitems = tq.getResultList();
 			return new ArrayList<MarketDataEntity>(allitems);
+
+		} catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		} finally {
+			session.close();
+		}
+	}
+	
+	public static ArrayList<ExecEntity> getExecs(String execId) {
+		Session session = sessionFactory.openSession();
+		try {
+			CriteriaBuilder cb = session.getCriteriaBuilder();
+			CriteriaQuery<ExecEntity> cq = cb.createQuery(ExecEntity.class);
+			Root<ExecEntity> root = cq.from(ExecEntity.class);
+			List<Predicate> predicates = new ArrayList<Predicate>();
+
+			if (execId != null)
+				predicates.add(cb.equal(root.get("execId"), execId));
+
+//			cq.orderBy(cb.desc(root.get("timestamp")));
+			cq.where(predicates.toArray(new Predicate[] {}));
+			TypedQuery<ExecEntity> tq = session.createQuery(cq);
+			List<ExecEntity> allitems = tq.getResultList();
+			return new ArrayList<ExecEntity>(allitems);
 
 		} catch (Exception e) {
 			e.printStackTrace();

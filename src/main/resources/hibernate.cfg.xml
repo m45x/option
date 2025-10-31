@@ -26,5 +26,6 @@
         <mapping class="de.option.entity.MarketDataEntity"/>
         <mapping class="de.option.entity.ContractEntity"/>
         <mapping class="de.option.entity.AktienEntity"/>
+        <mapping class="de.option.entity.ExecEntity"/>
     </session-factory>
 </hibernate-configuration>
