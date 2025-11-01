@@ -1,4 +1,4 @@
-package de.option.entity;
+package de.bergamotti.aktien.ibapi.entity;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

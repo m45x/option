@@ -1,4 +1,4 @@
-package de.option.entity;
+package de.bergamotti.aktien.ibapi.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

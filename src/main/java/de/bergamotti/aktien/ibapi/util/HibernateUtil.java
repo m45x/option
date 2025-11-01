@@ -1,4 +1,4 @@
-package de.option.util;
+package de.bergamotti.aktien.ibapi.util;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -10,10 +10,10 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.cfg.Configuration;
 
-import de.option.entity.AktieEntity;
-import de.option.entity.ContractEntity;
-import de.option.entity.ExecEntity;
-import de.option.entity.MarketDataEntity;
+import de.bergamotti.aktien.ibapi.entity.AktieEntity;
+import de.bergamotti.aktien.ibapi.entity.ContractEntity;
+import de.bergamotti.aktien.ibapi.entity.ExecEntity;
+import de.bergamotti.aktien.ibapi.entity.MarketDataEntity;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;

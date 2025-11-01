@@ -1,4 +1,4 @@
-package de.option.util;
+package de.bergamotti.aktien.ibapi.util;
 
 public class FieldEnum {
 //	1	BID	Aktueller Geldkurs (höchster Preis, den Käufer zahlen wollen)

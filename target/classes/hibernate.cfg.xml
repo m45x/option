@@ -23,9 +23,9 @@
         <property name="hibernate.format_sql">false</property>
 
         <!-- Entity-Klassen -->
-        <mapping class="de.option.entity.MarketDataEntity"/>
-        <mapping class="de.option.entity.ContractEntity"/>
-        <mapping class="de.option.entity.AktienEntity"/>
-        <mapping class="de.option.entity.ExecEntity"/>
+        <mapping class="de.bergamotti.aktion.ibapi.entity.MarketDataEntity"/>
+        <mapping class="de.bergamotti.aktion.ibapi.entity.ContractEntity"/>
+        <mapping class="de.bergamotti.aktion.ibapi.entity.AktienEntity"/>
+        <mapping class="de.bergamotti.aktion.ibapi.entity.ExecEntity"/>
     </session-factory>
 </hibernate-configuration>

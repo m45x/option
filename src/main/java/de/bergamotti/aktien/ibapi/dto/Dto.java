@@ -1,4 +1,4 @@
-package de.option.dto;
+package de.bergamotti.aktien.ibapi.dto;
 
 import java.math.BigDecimal;
 

@@ -1,4 +1,4 @@
-package de.option;
+package de.bergamotti.aktien.ibapi;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -46,12 +46,12 @@ import com.ib.client.TickAttribBidAsk;
 import com.ib.client.TickAttribLast;
 import com.ib.client.TickType;
 
-import de.option.dto.AccountDto;
-import de.option.entity.AktieEntity;
-import de.option.entity.ContractEntity;
-import de.option.entity.ExecEntity;
-import de.option.entity.MarketDataEntity;
-import de.option.util.HibernateUtil;
+import de.bergamotti.aktien.ibapi.dto.AccountDto;
+import de.bergamotti.aktien.ibapi.entity.AktieEntity;
+import de.bergamotti.aktien.ibapi.entity.ContractEntity;
+import de.bergamotti.aktien.ibapi.entity.ExecEntity;
+import de.bergamotti.aktien.ibapi.entity.MarketDataEntity;
+import de.bergamotti.aktien.ibapi.util.HibernateUtil;
 
 /**
  * 
