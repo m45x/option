@@ -26,7 +26,7 @@ public class ExecEntity {
     private Long id;
 
     @ManyToOne
-    private AktienEntity aktien;
+    private AktieEntity aktien;
     
     private String execId;
     private Integer orderId;
@@ -41,11 +41,11 @@ public class ExecEntity {
 		this.id = id;
 	}
 
-	public AktienEntity getAktien() {
+	public AktieEntity getAktien() {
 		return aktien;
 	}
 
-	public void setAktien(AktienEntity aktien) {
+	public void setAktien(AktieEntity aktien) {
 		this.aktien = aktien;
 	}
 

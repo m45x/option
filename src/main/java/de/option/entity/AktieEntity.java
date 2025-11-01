@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
 @Builder
 @Entity
 @Table(name = "aktien")
-public class AktienEntity {
+public class AktieEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -42,7 +42,7 @@ public class AktienEntity {
     private BigDecimal gewinnOderVerlust;
     private BigDecimal gebuehren;
   
-    public AktienEntity() {}
+    public AktieEntity() {}
 
 	public Long getId() {
 		return id;

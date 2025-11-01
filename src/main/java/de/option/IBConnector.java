@@ -40,13 +40,14 @@ import com.ib.client.Order;
 import com.ib.client.OrderState;
 import com.ib.client.PriceIncrement;
 import com.ib.client.SoftDollarTier;
+import com.ib.client.TagValue;
 import com.ib.client.TickAttrib;
 import com.ib.client.TickAttribBidAsk;
 import com.ib.client.TickAttribLast;
 import com.ib.client.TickType;
 
 import de.option.dto.AccountDto;
-import de.option.entity.AktienEntity;
+import de.option.entity.AktieEntity;
 import de.option.entity.ContractEntity;
 import de.option.entity.ExecEntity;
 import de.option.entity.MarketDataEntity;
@@ -160,7 +161,10 @@ public class IBConnector implements EWrapper {
 //		order.orderType("MKT");
 		order.lmtPrice(limitPrice.doubleValue());
 		order.tif("DAY");
-
+		
+		// Damit IBIS bevorzugt wird, sonst landet er wieder im Darkpool
+		order.smartComboRoutingParams(List.of(new TagValue("PreferredExchanges", contract.getPrimaryExch())));
+		
 		// get a unique order id
 		int orderIdToUse = getNextOrderId();
 
@@ -171,7 +175,7 @@ public class IBConnector implements EWrapper {
 		}
 
 		// Ohne preis in Aktien reinschreiben
-		AktienEntity aktie = HibernateUtil.neueAktie(contract, anzahl, orderIdToUse, limitPrice);
+		AktieEntity aktie = HibernateUtil.neueAktie(contract, anzahl, orderIdToUse, limitPrice);
 
 		// Bei der Simulation wird sofort der Preis gesetzt
 		// beim echten kauf erst wenn es wirklich gekauft wurde
@@ -179,7 +183,7 @@ public class IBConnector implements EWrapper {
 			HibernateUtil.kaufAusgefuehrt(aktie.getId(), limitPrice, this.calcStopLoss(limitPrice));
 	}
 
-	private void verkaufen(AktienEntity aktie, ContractEntity contractEntity, BigDecimal limitPrice) {
+	private void verkaufen(AktieEntity aktie, ContractEntity contractEntity, BigDecimal limitPrice) {
 
 		Contract contract = createContract(contractEntity);
 		//
@@ -213,6 +217,8 @@ public class IBConnector implements EWrapper {
 			 * if (aktie != null) {
 			 */
 			aktie = HibernateUtil.setAktieVerkauft(aktie.getId(), limitPrice);
+			
+			// Eigentlich müsste man hier auch die commisstion dinger simulieren
 			// }
 		}
 
@@ -225,7 +231,7 @@ public class IBConnector implements EWrapper {
 			return;
 		}
 
-		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
+		ArrayList<AktieEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
 		
 		if (contractEntity.getKaufbar() == false) {
 //			log.info("{} (pruefeKaufEntscheidung) Nicht kaufbar.", contractEntity.getSymbol());
@@ -468,8 +474,8 @@ public class IBConnector implements EWrapper {
 			return;
 		}
 
-		ArrayList<AktienEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
-		for (AktienEntity aktie : arrAktien) {
+		ArrayList<AktieEntity> arrAktien = HibernateUtil.getAktien(contractEntity.getSymbol(), true);
+		for (AktieEntity aktie : arrAktien) {
 			
 			// wenn geldkurs grösser kaufpreis dann verkaufen
 			if (aktie.getKaufpreis() == null) {
@@ -613,8 +619,7 @@ public class IBConnector implements EWrapper {
 		c.secType(contract.getSecType());
 		c.exchange(contract.getExchange());
 		c.currency(contract.getCurrency());
-		if (contract.getSecType().equals("STK") && contract.getPrimaryExch() != null
-				&& contract.getExchange().equals("SMART"))
+		if (contract.getSecType().equals("STK") && contract.getPrimaryExch() != null)
 			c.primaryExch(contract.getPrimaryExch());
 		return c;
 	}
@@ -702,14 +707,14 @@ public class IBConnector implements EWrapper {
 		// Schonmal account aktualisierung anstoßen
 		accountAktualisieren();
 
-		AktienEntity aktie = null;
+		AktieEntity aktie = null;
 		String side = execution.side();
 		if ("BOT".equals(side)) {
 			log.info("📈 Kauf ausgeführt! Kaufpreis " + execution.price());
 
 			// suche Aktie ohne Preis
-			ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
-			for (AktienEntity e : arr)
+			ArrayList<AktieEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
+			for (AktieEntity e : arr)
 				if (e.getKaufpreis() == null)
 					aktie = e;
 
@@ -724,8 +729,8 @@ public class IBConnector implements EWrapper {
 			log.info("📉 Verkauf ausgeführt!");
 
 			// Suche danach und dann updaten
-			ArrayList<AktienEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
-			for (AktienEntity e : arr)
+			ArrayList<AktieEntity> arr = HibernateUtil.getAktien(contract.symbol(), true);
+			for (AktieEntity e : arr)
 				if (e.getVerkkaufpreis() == null)
 					aktie = e;
 
@@ -742,6 +747,22 @@ public class IBConnector implements EWrapper {
 			execEntity.setOrderId(execution.orderId());
 			execEntity.setExecId(execution.execId());
 			HibernateUtil.save(execEntity);
+			
+			log.info("=== Execution Details ===");
+			log.info("Kauf/Verkauf: " + side);
+			log.info("ReqId:        " + reqId);
+			log.info("Symbol:       " + contract.symbol());
+		    log.info("SecType:      " + contract.secType());
+		    log.info("Exchange:     " + execution.exchange());  // <-- Hier siehst du z. B. IBIS, CHIXDE, TRQX, etc.
+		    log.info("OrderId:      " + execution.orderId());
+		    log.info("ExecId:       " + execution.execId());
+		    log.info("Time:         " + execution.time());
+		    log.info("Shares:       " + execution.shares());
+		    log.info("Price:        " + execution.price());
+		    log.info("Side:         " + execution.side());
+		    log.info("CumQty:       " + execution.cumQty());
+		    log.info("AvgPrice:     " + execution.avgPrice());
+		    log.info("=========================");
 		}
 		
 	}
@@ -1227,10 +1248,19 @@ public class IBConnector implements EWrapper {
 	public void commissionReport(CommissionReport commissionReport) {
 		log.info("commissionReport");
 		
+		log.info("  ExecId: " + commissionReport.execId());
+		log.info("  Commission: " + commissionReport.commission() + " " + commissionReport.currency());
+		
 		ArrayList<ExecEntity> arr = HibernateUtil.getExecs(commissionReport.execId());
 		
 		if (arr!=null && arr.size()==1) {
-			HibernateUtil.addGebuehrZuAktie(arr.get(0).getAktien() , new BigDecimal(commissionReport.commission()));
+			BigDecimal gebuehr = new BigDecimal(commissionReport.commission());
+
+			HibernateUtil.addGebuehrZuAktie(arr.get(0).getAktien() , gebuehr);
+			
+			// Gewinn oder Verlust ermitteln
+//			HibernateUtil.ermittelGewinnOderVerlustBeiAktie(arr.get(0).getAktien());
+			HibernateUtil.setzeGewinnOderVerlustBeiAktie(arr.get(0).getAktien() , new BigDecimal(commissionReport.realizedPNL()));	
 		}
 
 	}
