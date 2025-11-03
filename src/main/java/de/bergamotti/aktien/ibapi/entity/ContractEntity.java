@@ -1,5 +1,7 @@
 package de.bergamotti.aktien.ibapi.entity;
 
+import java.time.LocalDateTime;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -30,6 +32,8 @@ public class ContractEntity {
     private String currency;
     private String secType;
     private String primaryExch;
+    
+    private LocalDateTime tickerLastStartet;
 
     public ContractEntity() {}
 
@@ -112,6 +116,14 @@ public class ContractEntity {
 
 	public void setKaufbar(Boolean kaufbar) {
 		this.kaufbar = kaufbar;
+	}
+
+	public LocalDateTime getTickerLastStartet() {
+		return tickerLastStartet;
+	}
+
+	public void setTickerLastStartet(LocalDateTime tickerLastStartet) {
+		this.tickerLastStartet = tickerLastStartet;
 	}
 
 }

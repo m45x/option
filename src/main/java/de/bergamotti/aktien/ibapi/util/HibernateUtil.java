@@ -1,6 +1,7 @@
 package de.bergamotti.aktien.ibapi.util;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import de.bergamotti.aktien.ibapi.entity.AktieEntity;
 import de.bergamotti.aktien.ibapi.entity.ContractEntity;
 import de.bergamotti.aktien.ibapi.entity.ExecEntity;
 import de.bergamotti.aktien.ibapi.entity.MarketDataEntity;
+import de.bergamotti.aktien.ibapi.entity.ParameterEntity;
 import jakarta.persistence.TypedQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -59,6 +61,19 @@ public class HibernateUtil {
 		}
 	}
 	
+	public static void tickerGestartet(ContractEntity contract) {
+		Session session = sessionFactory.openSession();
+		try {
+			session.beginTransaction();
+			contract = session.find(ContractEntity.class, contract.getId());
+			contract.setTickerLastStartet(LocalDateTime.now());
+			session.merge(contract);
+		} finally {
+			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
 	public static AktieEntity neueAktie(ContractEntity contract, BigDecimal anzahl, Integer orderId, BigDecimal kauflimit) {
 		Session session = sessionFactory.openSession();
 		try {
@@ -100,7 +115,17 @@ public class HibernateUtil {
 		try {
 			session.beginTransaction();
 			aktie = session.find(AktieEntity.class, aktie.getId());
-			aktie.setGewinnOderVerlust(gewinnOderVerlust);
+			// Round to 2 decimal places and ensure value fits into DECIMAL(38,2)
+			if (gewinnOderVerlust != null) {
+				BigDecimal rounded = gewinnOderVerlust.setScale(2, RoundingMode.HALF_UP);
+				BigDecimal limit = new BigDecimal("1E36"); // absolute value must be less than 10^36 for PRECISION 38, SCALE 2
+				if (rounded.abs().compareTo(limit) >= 0) {
+					throw new IllegalArgumentException("gewinnOderVerlust zu groß für DECIMAL(38,2): " + rounded);
+				}
+				aktie.setGewinnOderVerlust(rounded);
+			} else {
+				aktie.setGewinnOderVerlust(null);
+			}
 			session.merge(aktie);
 		} finally {
 			session.getTransaction().commit();
@@ -173,10 +198,50 @@ public class HibernateUtil {
 			}
 			aktie.setVerkkaufpreis(verkaufspreis);
 			aktie.setVerkaufdatum(LocalDateTime.now());
-			aktie.setGewinnOderVerlust(verkaufspreis.subtract(aktie.getKaufpreis()));
+			// Calculate GewinnOderVerlust, round to 2 decimals and ensure it fits DECIMAL(38,2)
+			if (verkaufspreis != null && aktie.getKaufpreis() != null) {
+				BigDecimal diff = verkaufspreis.subtract(aktie.getKaufpreis());
+				BigDecimal rounded = diff.setScale(2, RoundingMode.HALF_UP);
+				BigDecimal limit = new BigDecimal("1E36");
+				if (rounded.abs().compareTo(limit) >= 0) {
+					throw new IllegalArgumentException("berechneter Gewinn/Verlust zu groß für DECIMAL(38,2): " + rounded);
+				}
+				aktie.setGewinnOderVerlust(rounded);
+			} else {
+				aktie.setGewinnOderVerlust(null);
+			}
 			return session.merge(aktie);
 		} finally {
 			session.getTransaction().commit();
+			session.close();
+		}
+	}
+	
+	public static ArrayList<ParameterEntity> getParameter(String parameterName , Boolean nurAktive) {
+		Session session = sessionFactory.openSession();
+		try {
+			CriteriaBuilder cb = session.getCriteriaBuilder();
+			CriteriaQuery<ParameterEntity> cq = cb.createQuery(ParameterEntity.class);
+			Root<ParameterEntity> root = cq.from(ParameterEntity.class);
+			List<Predicate> predicates = new ArrayList<Predicate>();
+
+			// if (emailExact != null && !emailExact.equals(""))
+			// predicates.add(cb.like(root.get(ProfileEntity_.email), emailExact));
+			if (nurAktive)
+				predicates.add(cb.equal(root.get("aktiv"), Boolean.TRUE));
+
+			if (parameterName != null)
+				predicates.add(cb.equal(root.get("parameterName"), parameterName));
+
+			cq.where(predicates.toArray(new Predicate[] {}));
+			TypedQuery<ParameterEntity> tq = session.createQuery(cq);
+			List<ParameterEntity> allitems = tq.getResultList();
+			return new ArrayList<ParameterEntity>(allitems);
+
+		} catch (Exception e) {
+			e.printStackTrace();
+			return null;
+		} finally {
 			session.close();
 		}
 	}
@@ -242,7 +307,8 @@ public class HibernateUtil {
 
 	public static ArrayList<MarketDataEntity> getMarketDataDesc(String symbol, 
 			String tickerType,
-			boolean vonHeute
+			boolean vonHeute,
+			LocalDateTime abWann
 			) {
 		Session session = sessionFactory.openSession();
 		try {
@@ -264,6 +330,8 @@ public class HibernateUtil {
 				predicates.add(cb.equal(root.get("symbol"), symbol));
 			if (vonHeute)
 				predicates.add(cb.greaterThanOrEqualTo(root.get("timestamp"), heute));
+			if (abWann != null)
+				predicates.add(cb.greaterThanOrEqualTo(root.get("timestamp"), abWann));
 
 			cq.orderBy(cb.desc(root.get("timestamp")));
 			cq.where(predicates.toArray(new Predicate[] {}));
