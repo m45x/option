@@ -1,5 +1,6 @@
 package de.bergamotti.aktien.ibapi.entity;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
@@ -32,6 +33,9 @@ public class ContractEntity {
     private String currency;
     private String secType;
     private String primaryExch;
+    
+    private BigDecimal letzterGeldKurs;
+    private BigDecimal letzterBriefKurs;
     
     private LocalDateTime tickerLastStartet;
 
@@ -124,6 +128,22 @@ public class ContractEntity {
 
 	public void setTickerLastStartet(LocalDateTime tickerLastStartet) {
 		this.tickerLastStartet = tickerLastStartet;
+	}
+
+	public BigDecimal getLetzterGeldKurs() {
+		return letzterGeldKurs;
+	}
+
+	public void setLetzterGeldKurs(BigDecimal letzterGeldKurs) {
+		this.letzterGeldKurs = letzterGeldKurs;
+	}
+
+	public BigDecimal getLetzterBriefKurs() {
+		return letzterBriefKurs;
+	}
+
+	public void setLetzterBriefKurs(BigDecimal letzterBriefKurs) {
+		this.letzterBriefKurs = letzterBriefKurs;
 	}
 
 }

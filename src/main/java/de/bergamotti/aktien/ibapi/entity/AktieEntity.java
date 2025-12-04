@@ -41,6 +41,7 @@ public class AktieEntity {
     private BigDecimal anzahlAktien;
     private BigDecimal gewinnOderVerlust;
     private BigDecimal gebuehren;
+    private Boolean kaufError;
   
     public AktieEntity() {}
 
@@ -162,6 +163,14 @@ public class AktieEntity {
 
 	public void setGebuehren(BigDecimal gebuehren) {
 		this.gebuehren = gebuehren;
+	}
+
+	public Boolean getKaufError() {
+		return kaufError;
+	}
+
+	public void setKaufError(Boolean kaufError) {
+		this.kaufError = kaufError;
 	}
 	
 }
